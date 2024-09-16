@@ -458,7 +458,7 @@ static C_KZG_RET compute_r_powers_for_verify_cell_kzg_proof_batch(
         bytes_from_uint64(offset, i);
 
         /* Hash to get the coefficient */
-        blst_sha256(r_bytes.bytes, bytes, input_size);
+        blst_sha256(r_bytes.bytes, midhash, midhash_size);
 
         /* We only want half of the bytes */
         memset(r_bytes.bytes, 0x00, 16);
