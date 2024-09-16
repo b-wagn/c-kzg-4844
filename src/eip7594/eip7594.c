@@ -357,7 +357,7 @@ static void deduplicate_commitments(
  * Compute random linear combination challenge scalars for verify_cell_kzg_proof_batch. In this, we
  * must hash EVERYTHING that the prover can control.
  *
- * @param[out]  r_powers_out        The output challenges
+ * @param[out]  coefficients_out    The output challenges
  * @param[in]   commitments_bytes   The input commitments
  * @param[in]   num_commitments     The number of commitments
  * @param[in]   commitment_indices  The cell commitment indices
@@ -367,7 +367,7 @@ static void deduplicate_commitments(
  * @param[in]   num_cells           The number of cells
  */
 static C_KZG_RET compute_r_powers_for_verify_cell_kzg_proof_batch(
-    fr_t *r_powers_out,
+    fr_t *coefficients_out,
     const Bytes48 *commitments_bytes,
     size_t num_commitments,
     const uint64_t *commitment_indices,
@@ -378,6 +378,7 @@ static C_KZG_RET compute_r_powers_for_verify_cell_kzg_proof_batch(
 ) {
     C_KZG_RET ret;
     uint8_t *bytes = NULL;
+    uint8_t *midhash = NULL;
     Bytes32 r_bytes;
     fr_t r;
 
@@ -394,6 +395,11 @@ static C_KZG_RET compute_r_powers_for_verify_cell_kzg_proof_batch(
 
     /* Allocate space to copy this data into */
     ret = c_kzg_malloc((void **)&bytes, input_size);
+    if (ret != C_KZG_OK) goto out;
+
+    /* Allicate space for the mid-hash and indices */
+    size_t midhash_size = 32 + sizeof(uint64_t);
+    ret = c_kzg_malloc((void **)&midhash, midhash_size);
     if (ret != C_KZG_OK) goto out;
 
     /* Pointer tracking `bytes` for writing on top of it */
@@ -439,18 +445,31 @@ static C_KZG_RET compute_r_powers_for_verify_cell_kzg_proof_batch(
         offset += BYTES_PER_PROOF;
     }
 
-    /* Now let's create the challenge! */
-    blst_sha256(r_bytes.bytes, bytes, input_size);
-    hash_to_bls_field(&r, &r_bytes);
-
-    /* Raise power of r for each cell */
-    compute_powers(r_powers_out, &r, num_cells);
-
     /* Make sure we wrote the entire buffer */
     assert(offset == bytes + input_size);
 
+    /* Create a mid-hash to summarize what we have */
+    blst_sha256(midhash, bytes, input_size);
+
+    /* Hash the mid-hash and indices to get the challenges */
+    offset = &midhash[32];
+    for (uint64_t i = 0; i < num_cells; i++) {
+        /* Write i into the mid-hash */
+        bytes_from_uint64(offset, i);
+
+        /* Hash to get the coefficient */
+        blst_sha256(r_bytes.bytes, bytes, input_size);
+
+        /* We only want half of the bytes */
+        memset(r_bytes.bytes, 0x00, 16);
+
+        hash_to_bls_field(&r, &r_bytes);
+        coefficients_out[i] = r;
+    }
+
 out:
     c_kzg_free(bytes);
+    c_kzg_free(midhash);
     return ret;
 }
 
